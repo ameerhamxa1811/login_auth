@@ -23,17 +23,17 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     on<ValidatePassword>(_validatePassword);
   }
 
+
   Future<void> _startAuthentication(
       StartAuthentication event, Emitter<AuthState> emit) async {
-    bool didAuthenticate = await _authenticateWithFingerprint();
+    bool didAuthenticate = await _authenticateWithFingerprint(emit);
     if (didAuthenticate) {
       emit(AuthSuccess("You are authorized"));
-    } else {
-      emit(AuthFaceLock());
     }
   }
 
-  Future<bool> _authenticateWithFingerprint() async {
+
+  Future<bool> _authenticateWithFingerprint(Emitter<AuthState> emit) async {
     try {
       bool isAuthenticated = await auth.authenticate(
         localizedReason: 'Please authenticate with your fingerprint',
@@ -42,20 +42,54 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
         ),
       );
       return isAuthenticated;
-    } catch (_) {
+    } catch (e) {
+      // Increment fingerprint failure attempts and check limit
+      fingerAttempts += 1;
+      if (fingerAttempts >= 2) {
+        // Move to Face Lock after 2 failed fingerprint attempts
+        emit(AuthFaceLock());
+      }
       return false;
     }
   }
+
 
   Future<void> _handleFingerprintFailure(
       FingerprintFailed event, Emitter<AuthState> emit) async {
     fingerAttempts += 1;
     if (fingerAttempts >= 2) {
       emit(AuthFaceLock());
-    } else {
-      emit(AuthFingerprint());
     }
   }
+
+
+  Future<void> _startFaceLock(Emitter<AuthState> emit) async {
+    bool isFaceAuthenticated = await _authenticateWithFaceLock(emit);
+    if (isFaceAuthenticated) {
+      emit(AuthSuccess("You are authorized"));
+    }
+  }
+
+  Future<bool> _authenticateWithFaceLock(Emitter<AuthState> emit) async {
+    try {
+      bool isFaceAuthenticated = await auth.authenticate(
+        localizedReason: 'Please authenticate with your face',
+        options: const AuthenticationOptions(
+          biometricOnly: true,
+        ),
+      );
+      return isFaceAuthenticated;
+    } catch (e) {
+      faceAttempts += 1;
+      if (faceAttempts >= 2) {
+        emit(AuthPinLock());
+      } else {
+        emit(AuthFaceLock());
+      }
+      return false;
+    }
+  }
+
 
   Future<void> _handleFaceLockFailure(
       FaceLockFailed event, Emitter<AuthState> emit) async {
@@ -67,6 +101,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     }
   }
 
+
   Future<void> _handlePinLockFailure(
       PinLockFailed event, Emitter<AuthState> emit) async {
     pinAttempts += 1;
@@ -77,6 +112,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     }
   }
 
+
   Future<void> _checkPin(CheckPin event, Emitter<AuthState> emit) async {
     String? savedPin = await storage.read(key: 'user_pin');
     if (savedPin == event.pin) {
@@ -85,6 +121,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       add(PinLockFailed());
     }
   }
+
 
   Future<void> _validatePassword(
       ValidatePassword event, Emitter<AuthState> emit) async {
@@ -95,7 +132,6 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     if (response.statusCode == 200) {
       emit(AuthSuccess("You are authorized"));
     } else {
-      // Handle failure if needed
     }
   }
 }
